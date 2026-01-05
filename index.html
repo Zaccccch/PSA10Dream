@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>最中幻想 - 完整指南版</title>
+    <style>
+        :root { --bg: #202225; --sidebar: #2f3136; --text: #ffffff; --accent: #007bff; --success: #28a745; }
+        body { margin: 0; display: flex; height: 100vh; background-color: var(--bg); color: var(--text); font-family: -apple-system, sans-serif; overflow: hidden; }
+        
+        /* 侧边栏布局 */
+        #sidebar { width: 280px; background: var(--sidebar); padding: 20px; box-shadow: 2px 0 5px rgba(0,0,0,0.3); z-index: 10; display: flex; flex-direction: column; overflow-y: auto; }
+        .section { margin-bottom: 20px; border-bottom: 1px solid #444; padding-bottom: 15px; }
+        h3 { font-size: 13px; margin: 0 0 10px 0; color: #8e9297; text-transform: uppercase; letter-spacing: 0.5px; }
+        
+        /* 按钮样式 */
+        button { width: 100%; padding: 10px; margin: 5px 0; border: none; border-radius: 5px; background: #4f545c; color: white; cursor: pointer; font-weight: bold; transition: 0.2s; }
+        button:hover { background: #686d73; }
+        button.primary { background: var(--accent); }
+        button.primary:hover { background: #0056b3; }
+        button.save { background: var(--success); }
+        button.save:hover { background: #218838; }
+
+        /* 状态指示灯 */
+        #status-container { display: flex; align-items: center; margin-bottom: 20px; padding: 10px; background: rgba(0,0,0,0.3); border-radius: 8px; }
+        .light { width: 12px; height: 12px; border-radius: 50%; background-color: #ff4d4d; margin-right: 10px; box-shadow: 0 0 8px #ff4d4d; }
+        .light.ready { background-color: #2ecc71; box-shadow: 0 0 8px #2ecc71; animation: none; }
+        .light.loading { animation: pulse 1s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.4; } 100% { opacity: 1; } }
+        #status-text { font-size: 13px; font-weight: bold; }
+
+        /* 使用说明区域 (左下角) */
+        .instruction-box { margin-top: auto; background: rgba(0,0,0,0.25); padding: 15px; border-radius: 8px; border-left: 4px solid var(--accent); }
+        .instruction-box h4 { margin: 0 0 8px 0; font-size: 14px; color: var(--accent); }
+        .instruction-box p { margin: 5px 0; font-size: 12px; color: #dcddde; line-height: 1.5; }
+        .step-num { display: inline-block; width: 18px; height: 18px; background: #4f545c; border-radius: 50%; text-align: center; font-size: 11px; margin-right: 5px; color: white; }
+
+        /* 主显示区 */
+        #main { flex: 1; display: flex; justify-content: center; align-items: center; background: #0f1012; position: relative; }
+        canvas { max-width: 95%; max-height: 95%; box-shadow: 0 0 20px rgba(0,0,0,0.5); cursor: crosshair; }
+    </style>
+</head>
+<body>
+
+<div id="sidebar">
+    <div id="status-container">
+        <div id="status-light" class="light loading"></div>
+        <span id="status-text">检查 OpenCV 连接...</span>
+    </div>
+
+    <div class="section">
+        <h3>1. 原始图像</h3>
+        <input type="file" id="fileInput" accept="image/*" style="display:none">
+        <button class="primary" onclick="handleOpenImage()">打开本地图片</button>
+        <button onclick="location.reload()">重启应用</button>
+    </div>
+
+    <div class="section">
+        <h3>2. 矫正与测量</h3>
+        <button class="primary" onclick="doRectify()">执行透视矫正</button>
+        <button onclick="enterStage2()">重选测量边界</button>
+        <button class="save" onclick="saveImageWithDialog()">另存为结果图</button>
+    </div>
+
+    <div class="instruction-box">
+        <h4>💡 操作指南</h4>
+        <p><span class="step-num">1</span> 待上方信号灯变绿后，打开图片。</p>
+        <p><span class="step-num">2</span> <strong>阶段1</strong>: 在图上依次点击物体的四个角（顺序：左上、右上、右下、左下）。</p>
+        <p><span class="step-num">3</span> 点击“执行透视矫正”生成正视图。</p>
+        <p><span class="step-num">4</span> <strong>阶段2</strong>: 在新图上点击4下确定内框，随后可拖动黄线微调边距。</p>
+        <p><span class="step-num">5</span> 确认无误后，点击“另存为”保存。</p>
+    </div>
+</div>
+
+<div id="main">
+    <canvas id="canvas"></canvas>
+</div>
+
+<script>
+    // --- 1. 智能加载逻辑 (官方源优先 + 10秒超时切大陆镜像) ---
+    const primarySrc = "https://docs.opencv.org/4.x/opencv.js";
+    const backupSrc = "https://mirrors.sohu.com/opencv/4.5.5/opencv.js";
+    let isCvLoaded = false;
+
+    function loadScript(src) {
+        const script = document.createElement('script');
+        script.src = src; script.async = true; script.id = 'opencv-script';
+        document.head.appendChild(script);
+    }
+
+    loadScript(primarySrc);
+
+    const timeoutHandle = setTimeout(() => {
+        if (!isCvLoaded) {
+            document.getElementById('status-text').innerText = "官方超时，切备用源...";
+            const old = document.getElementById('opencv-script'); if (old) old.remove();
+            loadScript(backupSrc);
+        }
+    }, 10000);
+
+    var Module = {
+        onRuntimeInitialized: () => {
+            isCvLoaded = true; clearTimeout(timeoutHandle);
+            document.getElementById('status-light').className = 'light ready';
+            document.getElementById('status-text').innerText = 'OpenCV 已就绪';
+        }
+    };
+
+    // --- 2. 测距与矫正逻辑 ---
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let imgOrig = null, matOrig = null, matRectified = null;
+    let stage = 1, points1 = [], points2 = [], isCollecting2 = false, lines = null, dragging = null;
+
+    function handleOpenImage() {
+        if (!isCvLoaded) return alert("请等待信号灯变绿后再操作");
+        document.getElementById('fileInput').click();
+    }
+
+    document.getElementById('fileInput').onchange = (e) => {
+        const file = e.target.files[0]; if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            imgOrig = new Image();
+            imgOrig.onload = () => {
+                canvas.width = imgOrig.width; canvas.height = imgOrig.height;
+                if (matOrig) matOrig.delete();
+                matOrig = cv.imread(imgOrig);
+                stage = 1; points1 = []; points2 = []; lines = null;
+                redraw();
+            };
+            imgOrig.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+    };
+
+    function doRectify() {
+        if (points1.length !== 4) return alert("请先点选四个角点");
+        let srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, points1.flatMap(p => [p.x, p.y]));
+        const [p1, p2, p3, p4] = points1;
+        const w = Math.max(Math.hypot(p2.x-p1.x, p2.y-p1.y), Math.hypot(p3.x-p4.x, p3.y-p4.y));
+        const h = Math.max(Math.hypot(p4.x-p1.x, p4.y-p1.y), Math.hypot(p3.x-p2.x, p3.y-p2.y));
+        let dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, w, 0, w, h, 0, h]);
+        let M = cv.getPerspectiveTransform(srcPts, dstPts);
+        if (matRectified) matRectified.delete();
+        matRectified = new cv.Mat();
+        cv.warpPerspective(matOrig, matRectified, M, new cv.Size(w, h));
+        canvas.width = w; canvas.height = h;
+        stage = 2; isCollecting2 = true; points2 = []; lines = null;
+        redraw();
+        srcPts.delete(); dstPts.delete(); M.delete();
+    }
+
+    function redraw() {
+        if (stage === 1 && matOrig) { cv.imshow(canvas, matOrig); drawOverlay1(); }
+        else if (stage === 2 && matRectified) { cv.imshow(canvas, matRectified); drawOverlay2(); }
+    }
+
+    function drawOverlay1() {
+        ctx.fillStyle = "#00ff00"; ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 3;
+        points1.forEach((p, i) => {
+            ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, Math.PI*2); ctx.fill();
+            ctx.font = "bold 20px Arial"; ctx.fillText(i+1, p.x+15, p.y-15);
+        });
+    }
+
+    function drawOverlay2() {
+        if (isCollecting2) {
+            ctx.fillStyle = "#00ff00";
+            points2.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 6, 0, Math.PI*2); ctx.fill(); });
+        } else if (lines) {
+            ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 2;
+            ctx.beginPath(); ctx.moveTo(lines.left, 0); ctx.lineTo(lines.left, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(lines.right, 0); ctx.lineTo(lines.right, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, lines.top); ctx.lineTo(canvas.width, lines.top); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, lines.bottom); ctx.lineTo(canvas.width, lines.bottom); ctx.stroke();
+            // 数值面板
+            ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(canvas.width-180, 20, 160, 100);
+            ctx.fillStyle = "white"; ctx.font = "14px Arial";
+            ctx.fillText(`L: ${lines.left.toFixed(1)}px`, canvas.width-160, 50);
+            ctx.fillText(`R: ${(canvas.width-lines.right).toFixed(1)}px`, canvas.width-160, 70);
+            ctx.fillText(`T: ${lines.top.toFixed(1)}px`, canvas.width-160, 90);
+            ctx.fillText(`B: ${(canvas.height-lines.bottom).toFixed(1)}px`, canvas.width-160, 110);
+        }
+    }
+
+    canvas.onmousedown = (e) => {
+        const r = canvas.getBoundingClientRect();
+        const x = (e.clientX - r.left) * (canvas.width / r.width);
+        const y = (e.clientY - r.top) * (canvas.height / r.height);
+        if (stage === 1 && points1.length < 4) points1.push({x, y});
+        else if (stage === 2) {
+            if (isCollecting2) {
+                points2.push({x, y});
+                if (points2.length === 4) {
+                    lines = { left: Math.min(...points2.map(p=>p.x)), right: Math.max(...points2.map(p=>p.x)), top: Math.min(...points2.map(p=>p.y)), bottom: Math.max(...points2.map(p=>p.y)) };
+                    isCollecting2 = false;
+                }
+            } else if (lines) {
+                const tol = 20;
+                if (Math.abs(x - lines.left) < tol) dragging = 'left';
+                else if (Math.abs(x - lines.right) < tol) dragging = 'right';
+                else if (Math.abs(y - lines.top) < tol) dragging = 'top';
+                else if (Math.abs(y - lines.bottom) < tol) dragging = 'bottom';
+            }
+        }
+        redraw();
+    };
+
+    window.onmousemove = (e) => {
+        if (!dragging || !lines) return;
+        const r = canvas.getBoundingClientRect();
+        const x = (e.clientX - r.left) * (canvas.width / r.width);
+        const y = (e.clientY - r.top) * (canvas.height / r.height);
+        if (dragging === 'left') lines.left = x; else if (dragging === 'right') lines.right = x;
+        else if (dragging === 'top') lines.top = y; else if (dragging === 'bottom') lines.bottom = y;
+        redraw();
+    };
+    window.onmouseup = () => dragging = null;
+
+    function enterStage2() { isCollecting2 = true; points2 = []; redraw(); }
+
+    // --- 3. 另存为对话框逻辑 ---
+    async function saveImageWithDialog() {
+        if (!matRectified) return alert("请先完成矫正再保存");
+        const defaultName = `Measure_${new Date().getTime()}`;
+        
+        if (window.showSaveFilePicker) {
+            try {
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: defaultName + '.png',
+                    types: [{ description: 'PNG图片', accept: {'image/png': ['.png']} }],
+                });
+                const blob = await new Promise(res => canvas.toBlob(res, 'image/png'));
+                const writable = await handle.createWritable();
+                await writable.write(blob); await writable.close();
+                return;
+            } catch (err) { if (err.name === 'AbortError') return; }
+        }
+
+        const fileName = window.prompt("请输入文件名:", defaultName);
+        if (fileName) {
+            const link = document.createElement('a');
+            link.download = fileName.endsWith('.png') ? fileName : fileName + '.png';
+            link.href = canvas.toDataURL();
+            link.click();
+        }
+    }
+</script>
+</body>
+</html>
