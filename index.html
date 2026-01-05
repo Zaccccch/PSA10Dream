@@ -3,213 +3,225 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PSA10Dream - 手机全屏版</title>
-    <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
+    <title>PSA10Dream - 移动专业版</title>
+    <script async src="https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.5.5/opencv.js" type="text/javascript"></script>
     <style>
-        :root { --bg: #000000; --panel: rgba(47, 49, 54, 0.85); --accent: #007bff; }
+        :root { --panel-bg: #222; --btn-gray: #444; --accent: #007bff; --green: #28a745; }
         * { touch-action: none; box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-        body { margin: 0; padding: 0; height: 100vh; background: var(--bg); color: white; font-family: sans-serif; overflow: hidden; position: fixed; width: 100%; }
+        body { margin: 0; background: #000; color: white; font-family: sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
 
-        /* 全屏画布区 */
-        #main { width: 100vw; height: 100vh; display: flex; justify-content: center; align-items: center; position: relative; z-index: 1; }
+        /* 引导弹窗 */
+        #guide-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 20px; }
+        .modal-box { background: #333; padding: 25px; border-radius: 15px; width: 100%; max-width: 320px; border: 1px solid #555; }
+        .modal-box h3 { margin-top: 0; color: var(--accent); }
+        .modal-box li { font-size: 14px; margin: 12px 0; color: #ddd; line-height: 1.4; }
+        #close-guide { width: 100%; background: var(--accent); color: white; border: none; padding: 12px; border-radius: 8px; font-weight: bold; margin-top: 10px; }
+
+        /* 上方菜单区 (基于你的草图) */
+        #top-menu { background: var(--panel-bg); padding: 12px 10px 5px 10px; transition: transform 0.3s ease; z-index: 100; position: relative; }
+        #top-menu.collapsed { transform: translateY(-100%); position: absolute; width: 100%; }
+        
+        .status-bar { display: flex; align-items: center; justify-content: center; font-size: 11px; margin-bottom: 10px; gap: 8px; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4d; }
+        .dot.ready { background: #2ecc71; box-shadow: 0 0 5px #2ecc71; }
+
+        /* 按钮网格 - 参照草图 3+2 布局 */
+        .btn-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; }
+        .btn-row.bottom { grid-template-columns: repeat(2, 1fr); }
+        
+        button { border: none; border-radius: 6px; padding: 10px 2px; font-size: 12px; color: white; background: var(--btn-gray); font-weight: bold; }
+        button.primary { background: var(--accent); }
+        button.success { background: var(--green); }
+        button:active { opacity: 0.7; }
+
+        /* 收放箭头手柄 (草图中间部分) */
+        #handle { position: absolute; bottom: -24px; left: 50%; transform: translateX(-50%); background: var(--panel-bg); width: 60px; height: 24px; border-radius: 0 0 30px 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; border-bottom: 1px solid #444; }
+        .arrow { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 7px solid #888; transition: 0.3s; }
+        #top-menu.collapsed .arrow { transform: rotate(180deg); }
+
+        /* 下方画布区 */
+        #view { flex: 1; position: relative; display: flex; align-items: center; justify-content: center; margin-top: 25px; }
         canvas { max-width: 100%; max-height: 100%; object-fit: contain; }
 
-        /* 顶部状态条 */
-        #top-bar { position: absolute; top: 10px; left: 10px; right: 10px; z-index: 10; display: flex; align-items: center; pointer-events: none; }
-        .status-pill { background: rgba(0,0,0,0.6); padding: 5px 12px; border-radius: 20px; display: flex; align-items: center; font-size: 12px; }
-        .light { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4d; margin-right: 6px; }
-        .light.ready { background: #2ecc71; box-shadow: 0 0 5px #2ecc71; }
-
-        /* 底部悬浮控制台 */
-        #control-panel { position: absolute; bottom: 20px; left: 10px; right: 10px; background: var(--panel); backdrop-filter: blur(10px); padding: 15px; border-radius: 15px; z-index: 10; display: flex; flex-direction: column; gap: 8px; box-shadow: 0 -5px 15px rgba(0,0,0,0.3); }
-        .btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        
-        button { border: none; border-radius: 8px; padding: 12px; font-weight: bold; font-size: 14px; color: white; background: #4f545c; }
-        button:active { opacity: 0.7; }
-        button.primary { background: var(--accent); }
-        button.save { background: #28a745; }
-
-        /* 数值显示面板 - 悬浮在右上角 */
-        #value-panel { position: absolute; top: 50px; right: 10px; background: rgba(0,0,0,0.7); padding: 10px; border-radius: 8px; font-size: 12px; pointer-events: none; display: none; z-index: 5; }
-        .val-row { display: flex; justify-content: space-between; gap: 15px; margin: 2px 0; }
-
-        /* 隐藏说明文字，手机空间宝贵，改为弹窗提示 */
-        .hint { font-size: 11px; color: #ccc; text-align: center; margin-top: 5px; }
+        /* 右侧数值浮窗 */
+        #stats { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.7); padding: 8px; border-radius: 6px; font-size: 10px; pointer-events: none; display: none; border: 1px solid #444; font-family: monospace; }
     </style>
 </head>
 <body>
 
-<div id="top-bar">
-    <div class="status-pill">
-        <div id="status-light" class="light"></div>
-        <span id="status-text">OpenCV 加载中...</span>
+<div id="guide-modal">
+    <div class="modal-box">
+        <h3>使用指南</h3>
+        <ul>
+            <li>1. 等待上方状态灯变绿。</li>
+            <li>2. <b>Stage1:</b> 点击卡片照片的四个角点。</li>
+            <li>3. 点击“执行矫正”生成正视图。</li>
+            <li>4. <b>Stage2:</b> 点4下划定卡片内边框。</li>
+            <li>5. 拖动出现的黄线，观察右上角像素。</li>
+        </ul>
+        <button id="close-guide">我已知晓</button>
     </div>
 </div>
 
-<div id="value-panel">
-    <div class="val-row"><span>左 (L):</span><span id="v-l">0</span></div>
-    <div class="val-row"><span>右 (R):</span><span id="v-r">0</span></div>
-    <div class="val-row"><span>上 (T):</span><span id="v-t">0</span></div>
-    <div class="val-row"><span>下 (B):</span><span id="v-b">0</span></div>
+<div id="top-menu">
+    <div class="status-bar">
+        <div id="indicator" class="dot"></div>
+        <span id="status-msg">正在初始化 OpenCV...</span>
+    </div>
+    
+    <div class="btn-row">
+        <button class="primary" onclick="openFile()">打开图片</button>
+        <button onclick="undo()">撤销选点</button>
+        <button onclick="location.reload()">重启</button>
+    </div>
+    <div class="btn-row bottom">
+        <button class="primary" id="go-rect" onclick="doRect()">执行矫正</button>
+        <button class="success" id="go-save" style="display:none" onclick="save()">保存图像</button>
+        <button id="go-rem" style="display:none" onclick="reMeasure()">重选内框</button>
+    </div>
+
+    <div id="handle" onclick="toggleMenu()">
+        <div class="arrow"></div>
+    </div>
 </div>
 
-<div id="main">
+<div id="view">
+    <div id="stats">
+        L: <span id="v-l">0</span> | R: <span id="v-r">0</span><br>
+        T: <span id="v-t">0</span> | B: <span id="v-b">0</span>
+    </div>
     <canvas id="canvas"></canvas>
 </div>
 
-<div id="control-panel">
-    <div class="btn-group">
-        <button class="primary" onclick="handleOpenImage()">打开图片</button>
-        <button onclick="location.reload()">重置应用</button>
-    </div>
-    <div id="stage-controls" style="display: none;" class="btn-group">
-        <button class="primary" id="main-action-btn" onclick="doRectify()">执行矫正</button>
-        <button id="sub-action-btn" onclick="enterStage2()">测距模式</button>
-    </div>
-    <button class="save" id="save-btn" style="display: none;" onclick="saveImage()">保存结果图</button>
-    <div class="hint" id="hint-text">请在图上点击卡片的四个角</div>
-</div>
-
-<input type="file" id="fileInput" accept="image/*" style="display:none">
+<input type="file" id="fIn" accept="image/*" style="display:none">
 
 <script>
-    const canvas = document.getElementById('canvas');
-    const ctx = canvas.getContext('2d');
-    let imgOrig = null, matOrig = null, matRectified = null;
-    let stage = 1, points1 = [], points2 = [], isCollecting2 = false, lines = null, dragging = null;
-    let isCvLoaded = false;
+    const cvs = document.getElementById('canvas');
+    const ctx = cvs.getContext('2d');
+    let rawImg = null, matSrc = null, matDst = null;
+    let s = 1, pts1 = [], pts2 = [], isM = false, lines = null, drag = null;
+    let ready = false;
 
-    var Module = {
-        onRuntimeInitialized: () => {
-            isCvLoaded = true;
-            document.getElementById('status-light').className = 'light ready';
-            document.getElementById('status-text').innerText = 'OpenCV 已就绪';
-        }
-    };
+    // 弹窗与菜单切换
+    document.getElementById('close-guide').onclick = () => document.getElementById('guide-modal').style.display='none';
+    function toggleMenu() { document.getElementById('top-menu').classList.toggle('collapsed'); }
 
-    function handleOpenImage() { if(isCvLoaded) document.getElementById('fileInput').click(); else alert("等待OpenCV..."); }
+    // OpenCV 加载完成
+    var Module = { onRuntimeInitialized: () => {
+        ready = true;
+        document.getElementById('indicator').className = 'dot ready';
+        document.getElementById('status-msg').innerText = 'OpenCV 就绪';
+    }};
 
-    document.getElementById('fileInput').onchange = (e) => {
+    function openFile() { if(ready) document.getElementById('fIn').click(); }
+
+    document.getElementById('fIn').onchange = (e) => {
         const file = e.target.files[0];
-        if(!file) return;
         const reader = new FileReader();
         reader.onload = (ev) => {
-            imgOrig = new Image();
-            imgOrig.onload = () => {
-                canvas.width = imgOrig.width;
-                canvas.height = imgOrig.height;
-                if(matOrig) matOrig.delete();
-                matOrig = cv.imread(imgOrig);
-                stage = 1; points1 = []; points2 = []; lines = null;
-                document.getElementById('stage-controls').style.display = 'grid';
-                document.getElementById('hint-text').innerText = "请依次点击卡片的四个角";
-                redraw();
+            rawImg = new Image();
+            rawImg.onload = () => {
+                cvs.width = rawImg.width; cvs.height = rawImg.height;
+                if(matSrc) matSrc.delete();
+                matSrc = cv.imread(rawImg);
+                s = 1; pts1 = []; pts2 = []; lines = null;
+                render();
             };
-            imgOrig.src = ev.target.result;
+            rawImg.src = ev.target.result;
         };
         reader.readAsDataURL(file);
     };
 
-    function getEventPos(e) {
-        const rect = canvas.getBoundingClientRect();
-        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-        // 核心修复：计算相对于显示尺寸的比例，再映射回原始像素
-        const scaleX = canvas.width / rect.width;
-        const scaleY = canvas.height / rect.height;
+    function getP(e) {
+        const r = cvs.getBoundingClientRect();
+        const t = e.touches ? e.touches[0] : e;
         return {
-            x: (clientX - rect.left) * scaleX,
-            y: (clientY - rect.top) * scaleY
+            x: (t.clientX - r.left) * (cvs.width / r.width),
+            y: (t.clientY - r.top) * (cvs.height / r.height)
         };
     }
 
-    canvas.addEventListener('touchstart', (e) => {
-        e.preventDefault();
-        const pos = getEventPos(e);
-        if (stage === 1 && points1.length < 4) {
-            points1.push(pos);
-        } else if (stage === 2) {
-            if (isCollecting2) {
-                points2.push(pos);
-                if (points2.length === 4) {
-                    lines = { left: Math.min(...points2.map(p=>p.x)), right: Math.max(...points2.map(p=>p.x)), top: Math.min(...points2.map(p=>p.y)), bottom: Math.max(...points2.map(p=>p.y)) };
-                    isCollecting2 = false;
-                    document.getElementById('value-panel').style.display = 'block';
-                    document.getElementById('hint-text').innerText = "长按并滑动黄线可微调";
+    cvs.addEventListener('touchstart', (e) => {
+        const p = getP(e);
+        if(s === 1 && pts1.length < 4) {
+            pts1.push(p);
+        } else if(s === 2) {
+            if(isM) {
+                pts2.push(p);
+                if(pts2.length === 4) {
+                    lines = { left: Math.min(...pts2.map(i=>i.x)), right: Math.max(...pts2.map(i=>i.x)), top: Math.min(...pts2.map(i=>i.y)), bottom: Math.max(...pts2.map(i=>i.y)) };
+                    isM = false;
+                    document.getElementById('stats').style.display = 'block';
                 }
-            } else if (lines) {
-                const tol = 50; // 手机端增加触摸灵敏度
-                if (Math.abs(pos.x - lines.left) < tol) dragging = 'left';
-                else if (Math.abs(pos.x - lines.right) < tol) dragging = 'right';
-                else if (Math.abs(pos.y - lines.top) < tol) dragging = 'top';
-                else if (Math.abs(pos.y - lines.bottom) < tol) dragging = 'bottom';
+            } else if(lines) {
+                const tol = 40;
+                if(Math.abs(p.x - lines.left) < tol) drag = 'left';
+                else if(Math.abs(p.x - lines.right) < tol) drag = 'right';
+                else if(Math.abs(p.y - lines.top) < tol) drag = 'top';
+                else if(Math.abs(p.y - lines.bottom) < tol) drag = 'bottom';
             }
         }
-        redraw();
-    }, {passive: false});
+        render();
+    });
 
-    canvas.addEventListener('touchmove', (e) => {
-        if (!dragging || !lines) return;
-        const pos = getEventPos(e);
-        if (dragging === 'left' || dragging === 'right') lines[dragging] = pos.x;
-        else lines[dragging] = pos.y;
-        redraw();
-    }, {passive: false});
+    cvs.addEventListener('touchmove', (e) => {
+        if(!drag) return;
+        const p = getP(e);
+        if(drag==='left'||drag==='right') lines[drag] = p.x;
+        else lines[drag] = p.y;
+        render();
+    });
 
-    canvas.addEventListener('touchend', () => dragging = null);
+    cvs.addEventListener('touchend', () => drag = null);
 
-    function doRectify() {
-        if (points1.length !== 4) return alert("请先点满4个角");
-        let srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, points1.flatMap(p => [p.x, p.y]));
-        const w = Math.max(Math.hypot(points1[1].x-points1[0].x, points1[1].y-points1[0].y), Math.hypot(points1[2].x-points1[3].x, points1[2].y-points1[3].y));
-        const h = Math.max(Math.hypot(points1[3].x-points1[0].x, points1[3].y-points1[0].y), Math.hypot(points1[2].x-points1[1].x, points1[2].y-points1[1].y));
-        let dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [0, 0, w, 0, w, h, 0, h]);
-        let M = cv.getPerspectiveTransform(srcPts, dstPts);
-        if (matRectified) matRectified.delete();
-        matRectified = new cv.Mat();
-        cv.warpPerspective(matOrig, matRectified, M, new cv.Size(w, h));
-        canvas.width = w; canvas.height = h;
-        stage = 2; isCollecting2 = true; points2 = []; lines = null;
-        document.getElementById('main-action-btn').innerText = "重选测距点";
-        document.getElementById('main-action-btn').onclick = enterStage2;
-        document.getElementById('save-btn').style.display = 'block';
-        document.getElementById('hint-text').innerText = "点选卡片内边框的四个角点";
-        redraw();
-        srcPts.delete(); dstPts.delete(); M.delete();
+    function doRect() {
+        if(pts1.length<4) return alert("请在图上点选4个角点");
+        let srcM = cv.matFromArray(4, 1, cv.CV_32FC2, pts1.flatMap(p => [p.x, p.y]));
+        const w = Math.max(Math.hypot(pts1[1].x-pts1[0].x, pts1[1].y-pts1[0].y), Math.hypot(pts1[2].x-pts1[3].x, pts1[2].y-pts1[3].y));
+        const h = Math.max(Math.hypot(pts1[3].x-pts1[0].x, pts1[3].y-pts1[0].y), Math.hypot(pts1[2].x-pts1[1].x, pts1[2].y-pts1[1].y));
+        let dstM = cv.matFromArray(4, 1, cv.CV_32FC2, [0,0, w,0, w,h, 0,h]);
+        let M = cv.getPerspectiveTransform(srcM, dstM);
+        if(matDst) matDst.delete();
+        matDst = new cv.Mat();
+        cv.warpPerspective(matSrc, matDst, M, new cv.Size(w, h));
+        cvs.width = w; cvs.height = h;
+        s = 2; isM = true; pts2 = []; lines = null;
+        document.getElementById('go-rect').style.display = 'none';
+        document.getElementById('go-save').style.display = 'inline-block';
+        document.getElementById('go-rem').style.display = 'inline-block';
+        render();
+        srcM.delete(); dstM.delete(); M.delete();
     }
 
-    function redraw() {
-        if (stage === 1 && matOrig) { cv.imshow(canvas, matOrig); draw1(); }
-        else if (stage === 2 && matRectified) { cv.imshow(canvas, matRectified); draw2(); }
+    function render() {
+        if(s===1 && matSrc) { cv.imshow(cvs, matSrc); d1(); }
+        if(s===2 && matDst) { cv.imshow(cvs, matDst); d2(); }
     }
 
-    function draw1() {
+    function d1() {
         ctx.fillStyle = "#00ff00";
-        points1.forEach((p, i) => {
-            ctx.beginPath(); ctx.arc(p.x, p.y, canvas.width/50, 0, Math.PI*2); ctx.fill();
-        });
+        pts1.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, cvs.width/60, 0, Math.PI*2); ctx.fill(); });
     }
 
-    function draw2() {
-        if (isCollecting2) {
+    function d2() {
+        if(isM) {
             ctx.fillStyle = "#00ff00";
-            points2.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, canvas.width/60, 0, Math.PI*2); ctx.fill(); });
-        } else if (lines) {
-            ctx.strokeStyle = "#ffff00"; ctx.lineWidth = canvas.width/150;
-            ctx.beginPath(); ctx.moveTo(lines.left, 0); ctx.lineTo(lines.left, canvas.height); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(lines.right, 0); ctx.lineTo(lines.right, canvas.height); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(0, lines.top); ctx.lineTo(canvas.width, lines.top); ctx.stroke();
-            ctx.beginPath(); ctx.moveTo(0, lines.bottom); ctx.lineTo(canvas.width, lines.bottom); ctx.stroke();
-            
+            pts2.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, cvs.width/80, 0, Math.PI*2); ctx.fill(); });
+        } else if(lines) {
+            ctx.strokeStyle = "#ffff00"; ctx.lineWidth = cvs.width/200;
+            [[lines.left,0,lines.left,cvs.height],[lines.right,0,lines.right,cvs.height],[0,lines.top,cvs.width,lines.top],[0,lines.bottom,cvs.height,lines.bottom]].forEach(l => {
+                ctx.beginPath(); ctx.moveTo(l[0],l[1]); ctx.lineTo(l[2],l[3]); ctx.stroke();
+            });
             document.getElementById('v-l').innerText = lines.left.toFixed(1);
-            document.getElementById('v-r').innerText = (canvas.width - lines.right).toFixed(1);
+            document.getElementById('v-r').innerText = (cvs.width - lines.right).toFixed(1);
             document.getElementById('v-t').innerText = lines.top.toFixed(1);
-            document.getElementById('v-b').innerText = (canvas.height - lines.bottom).toFixed(1);
+            document.getElementById('v-b').innerText = (cvs.height - lines.bottom).toFixed(1);
         }
     }
 
-    function enterStage2() { isCollecting2 = true; points2 = []; lines = null; document.getElementById('value-panel').style.display = 'none'; redraw(); }
-    function saveImage() { const a = document.createElement('a'); a.download = 'PSA_Result.png'; a.href = canvas.toDataURL(); a.click(); }
+    function undo() { if(s===1) pts1.pop(); else pts2.pop(); render(); }
+    function reMeasure() { isM = true; pts2 = []; lines = null; document.getElementById('stats').style.display = 'none'; render(); }
+    function save() { const a = document.createElement('a'); a.download = 'result.png'; a.href = cvs.toDataURL(); a.click(); }
 </script>
 </body>
 </html>
