@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PSA10Dream - 移动适配版</title>
+    <script async src="https://docs.opencv.org/4.x/opencv.js" type="text/javascript"></script>
+    <style>
+        :root { --bg: #202225; --sidebar: #2f3136; --accent: #007bff; }
+        * { touch-action: manipulation; box-sizing: border-box; }
+        body { margin: 0; display: flex; height: 100vh; background: var(--bg); color: white; font-family: sans-serif; overflow: hidden; }
+
+        /* 响应式布局：PC 侧边栏，手机 顶部栏 */
+        #container { display: flex; width: 100%; height: 100%; flex-direction: row; }
+        @media (max-width: 768px) {
+            #container { flex-direction: column; }
+            #sidebar { width: 100% !important; height: auto !important; max-height: 40vh; overflow-y: auto; }
+            #main { height: 60vh !important; }
+        }
+
+        #sidebar { width: 300px; background: var(--sidebar); padding: 15px; display: flex; flex-direction: column; box-shadow: 2px 0 10px rgba(0,0,0,0.5); }
+        #main { flex: 1; display: flex; justify-content: center; align-items: center; background: #000; position: relative; overflow: hidden; }
+        
+        canvas { max-width: 100%; max-height: 100%; object-fit: contain; touch-action: none; } /* 关键：禁止画布滚动 */
+
+        .section { margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #444; }
+        h3 { font-size: 12px; color: #8e9297; margin: 5px 0; }
+        button { width: 100%; padding: 12px; margin: 4px 0; border: none; border-radius: 6px; background: #4f545c; color: white; font-weight: bold; font-size: 14px; }
+        button.primary { background: var(--accent); }
+        
+        #status-container { display: flex; align-items: center; margin-bottom: 10px; font-size: 13px; }
+        .light { width: 10px; height: 10px; border-radius: 50%; background: #ff4d4d; margin-right: 8px; }
+        .light.ready { background: #2ecc71; box-shadow: 0 0 5px #2ecc71; }
+
+        .instruction-box { font-size: 11px; color: #b9bbbe; background: rgba(0,0,0,0.2); padding: 10px; border-radius: 5px; }
+    </style>
+</head>
+<body>
+
+<div id="container">
+    <div id="sidebar">
+        <div id="status-container">
+            <div id="status-light" class="light"></div>
+            <span id="status-text">OpenCV 加载中...</span>
+        </div>
+
+        <div class="section">
+            <input type="file" id="fileInput" accept="image/*" style="display:none">
+            <button class="primary" onclick="handleOpenImage()">打开图片 (Open)</button>
+        </div>
+
+        <div class="section">
+            <h3>控制 (Controls)</h3>
+            <button onclick="doRectify()">执行矫正 (Correct)</button>
+            <button onclick="enterStage2()">测距模式 (Measure)</button>
+            <button class="primary" style="background:#28a745" onclick="saveImage()">保存结果 (Save)</button>
+        </div>
+
+        <div class="instruction-box">
+            <strong>手机操作：</strong><br>
+            1. 选点时请精准点击卡片四个角。<br>
+            2. 测距模式下，点击4下后可<b>长按并拖动</b>黄线。
+        </div>
+    </div>
+
+    <div id="main">
+        <canvas id="canvas"></canvas>
+    </div>
+</div>
+
+<script>
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    let imgOrig = null, matOrig = null, matRectified = null;
+    let stage = 1, points1 = [], points2 = [], isCollecting2 = false, lines = null, dragging = null;
+    let isCvReady = false;
+
+    // OpenCV 加载
+    var Module = {
+        onRuntimeInitialized: () => {
+            isCvReady = true;
+            document.getElementById('status-light').classList.add('ready');
+            document.getElementById('status-text').innerText = 'OpenCV 已就绪';
+        }
+    };
+
+    function handleOpenImage() { if(isCvReady) document.getElementById('fileInput').click(); else alert("请稍候..."); }
+
+    document.getElementById('fileInput').onchange = (e) => {
+        const file = e.target.files[0];
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            imgOrig = new Image();
+            imgOrig.onload = () => {
+                canvas.width = imgOrig.width; canvas.height = imgOrig.height;
+                if(matOrig) matOrig.delete();
+                matOrig = cv.imread(imgOrig);
+                stage = 1; points1 = []; points2 = []; lines = null;
+                redraw();
+            };
+            imgOrig.src = ev.target.result;
+        };
+        reader.readAsDataURL(file);
+    };
+
+    // 坐标转换：处理缩放后的点击位置
+    function getMousePos(e) {
+        const rect = canvas.getBoundingClientRect();
+        const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+        const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+        return {
+            x: (clientX - rect.left) * (canvas.width / rect.width),
+            y: (clientY - rect.top) * (canvas.height / rect.height)
+        };
+    }
+
+    // 事件绑定：兼容鼠标和触摸
+    const startEvent = 'ontouchstart' in window ? 'touchstart' : 'mousedown';
+    const moveEvent = 'ontouchmove' in window ? 'touchmove' : 'mousemove';
+    const endEvent = 'ontouchend' in window ? 'touchend' : 'mouseup';
+
+    canvas.addEventListener(startEvent, (e) => {
+        if(e.type === 'touchstart') e.preventDefault();
+        const pos = getMousePos(e);
+        if (stage === 1 && points1.length < 4) {
+            points1.push(pos);
+        } else if (stage === 2) {
+            if (isCollecting2) {
+                points2.push(pos);
+                if (points2.length === 4) {
+                    lines = { left: Math.min(...points2.map(p=>p.x)), right: Math.max(...points2.map(p=>p.x)), top: Math.min(...points2.map(p=>p.y)), bottom: Math.max(...points2.map(p=>p.y)) };
+                    isCollecting2 = false;
+                }
+            } else if (lines) {
+                const tol = 40; // 手机端增加触摸判定范围
+                if (Math.abs(pos.x - lines.left) < tol) dragging = 'left';
+                else if (Math.abs(pos.x - lines.right) < tol) dragging = 'right';
+                else if (Math.abs(pos.y - lines.top) < tol) dragging = 'top';
+                else if (Math.abs(pos.y - lines.bottom) < tol) dragging = 'bottom';
+            }
+        }
+        redraw();
+    }, {passive: false});
+
+    canvas.addEventListener(moveEvent, (e) => {
+        if(!dragging) return;
+        const pos = getMousePos(e);
+        if (dragging === 'left') lines.left = pos.x;
+        else if (dragging === 'right') lines.right = pos.x;
+        else if (dragging === 'top') lines.top = pos.y;
+        else if (dragging === 'bottom') lines.bottom = pos.y;
+        redraw();
+    }, {passive: false});
+
+    window.addEventListener(endEvent, () => dragging = null);
+
+    function doRectify() {
+        if(points1.length < 4) return alert("请先选4个点");
+        let srcPts = cv.matFromArray(4, 1, cv.CV_32FC2, points1.flatMap(p => [p.x, p.y]));
+        const w = Math.max(Math.hypot(points1[1].x-points1[0].x, points1[1].y-points1[0].y), Math.hypot(points1[2].x-points1[3].x, points1[2].y-points1[3].y));
+        const h = Math.max(Math.hypot(points1[3].x-points1[0].x, points1[3].y-points1[0].y), Math.hypot(points1[2].x-points1[1].x, points1[2].y-points1[1].y));
+        let dstPts = cv.matFromArray(4, 1, cv.CV_32FC2, [0,0, w,0, w,h, 0,h]);
+        let M = cv.getPerspectiveTransform(srcPts, dstPts);
+        if(matRectified) matRectified.delete();
+        matRectified = new cv.Mat();
+        cv.warpPerspective(matOrig, matRectified, M, new cv.Size(w, h));
+        canvas.width = w; canvas.height = h;
+        stage = 2; isCollecting2 = true; points2 = []; lines = null;
+        redraw();
+        srcPts.delete(); dstPts.delete(); M.delete();
+    }
+
+    function redraw() {
+        if (stage === 1 && matOrig) { cv.imshow(canvas, matOrig); draw1(); }
+        else if (stage === 2 && matRectified) { cv.imshow(canvas, matRectified); draw2(); }
+    }
+
+    function draw1() {
+        ctx.fillStyle = "#00ff00";
+        points1.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 10, 0, Math.PI*2); ctx.fill(); });
+    }
+
+    function draw2() {
+        if(isCollecting2) {
+            ctx.fillStyle = "#00ff00";
+            points2.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, 8, 0, Math.PI*2); ctx.fill(); });
+        } else if(lines) {
+            ctx.strokeStyle = "#ffff00"; ctx.lineWidth = 4;
+            ctx.beginPath(); ctx.moveTo(lines.left, 0); ctx.lineTo(lines.left, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(lines.right, 0); ctx.lineTo(lines.right, canvas.height); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, lines.top); ctx.lineTo(canvas.width, lines.top); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(0, lines.bottom); ctx.lineTo(canvas.width, lines.bottom); ctx.stroke();
+        }
+    }
+
+    function enterStage2() { isCollecting2 = true; points2 = []; redraw(); }
+    function saveImage() { const a = document.createElement('a'); a.download = 'psa_result.png'; a.href = canvas.toDataURL(); a.click(); }
+</script>
+</body>
+</html>
