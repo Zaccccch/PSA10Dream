@@ -3,92 +3,102 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>PSA10Dream - 终极修复版</title>
+    <title>PSA10Dream - 最终适配版</title>
     <style>
-        :root { --panel-bg: #222; --accent: #007bff; --green: #28a745; }
-        * { box-sizing: border-box; touch-action: none; -webkit-tap-highlight-color: transparent; }
+        :root { --bg: #000; --panel: #1a1a1a; --accent: #007bff; }
+        * { box-sizing: border-box; touch-action: none; }
         
-        /* 强制全屏显示，禁止滚动 */
-        html, body { margin: 0; padding: 0; height: 100%; width: 100%; overflow: hidden; background: #000; color: white; font-family: sans-serif; }
-        body { display: flex; flex-direction: column; }
+        /* 使用 dvh 确保在手机浏览器中动态适配高度 */
+        html, body { 
+            margin: 0; padding: 0; width: 100%; height: 100dvh; 
+            overflow: hidden; background: var(--bg); color: white; 
+            display: flex; flex-direction: column; font-family: sans-serif;
+        }
 
-        /* 上方菜单布局 */
-        #top-menu { background: var(--panel-bg); padding: 10px; z-index: 100; transition: transform 0.3s; position: relative; flex-shrink: 0; }
-        #top-menu.collapsed { transform: translateY(-100%); position: absolute; width: 100%; }
+        /* 顶部菜单：增加 padding 避开手机状态栏 */
+        #top-menu { 
+            background: var(--panel); 
+            padding: calc(10px + env(safe-area-inset-top)) 10px 10px 10px; 
+            flex-shrink: 0; 
+            border-bottom: 1px solid #333; 
+            z-index: 100;
+        }
         
-        .status-bar { display: flex; align-items: center; justify-content: center; font-size: 11px; margin-bottom: 8px; gap: 8px; }
-        .dot { width: 8px; height: 8px; border-radius: 50%; background: #ff4d4d; }
+        .status-bar { display: flex; align-items: center; justify-content: center; font-size: 12px; margin-bottom: 10px; gap: 6px; }
+        .dot { width: 10px; height: 10px; border-radius: 50%; background: #ff4d4d; }
         .dot.ready { background: #2ecc71; box-shadow: 0 0 5px #2ecc71; }
 
-        .btn-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; margin-bottom: 6px; }
-        .btn-row.bottom { grid-template-columns: repeat(2, 1fr); }
-        button { border: none; border-radius: 6px; padding: 12px 2px; font-size: 12px; color: white; background: #444; font-weight: bold; cursor: pointer; }
+        /* 按钮容器：允许换行，确保窄屏下菜单不溢出 */
+        .btn-row { 
+            display: flex; 
+            flex-wrap: wrap; 
+            gap: 8px; 
+            justify-content: center; 
+        }
+        
+        button { 
+            min-width: 80px;
+            flex: 1 1 calc(30% - 10px); /* 手机端每行约3个按钮 */
+            border: none; border-radius: 6px; padding: 12px 5px; 
+            font-size: 13px; color: white; background: #333; 
+            font-weight: bold; cursor: pointer; 
+        }
         button.primary { background: var(--accent); }
-        button.success { background: var(--green); }
+        button.success { background: #28a745; }
 
-        #handle { position: absolute; bottom: -24px; left: 50%; transform: translateX(-50%); background: var(--panel-bg); width: 60px; height: 24px; border-radius: 0 0 30px 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
-        .arrow { width: 0; height: 0; border-left: 6px solid transparent; border-right: 6px solid transparent; border-top: 7px solid #888; transition: 0.3s; }
-        #top-menu.collapsed .arrow { transform: rotate(180deg); }
-
-        /* 图片显示区域 - 修复 404/偏移的核心 */
+        /* 图片显示区：占据除去菜单后的所有空间 */
         #view { 
             flex: 1; 
-            width: 100%;
-            height: 100%;
+            width: 100%; 
             position: relative; 
             display: flex; 
             align-items: center; 
             justify-content: center; 
-            overflow: hidden; /* 防止溢出 */
-            padding: 10px;
+            background: #000;
+            overflow: hidden; 
+            padding: 5px; /* 留一点空隙防止贴边 */
         }
 
-        /* 关键：Canvas 必须在视觉上 fit 容器 */
+        /* 画布：完美适配容器 */
         canvas { 
             max-width: 100%; 
             max-height: 100%; 
-            object-fit: contain; /* 保证全图可见 */
-            background: #111;
+            object-fit: contain; 
             display: block;
         }
 
-        #stats { position: absolute; top: 10px; right: 10px; background: rgba(0,0,0,0.8); padding: 10px; border-radius: 8px; font-size: 12px; pointer-events: none; display: none; border: 1px solid #555; font-family: monospace; }
-        #guide-modal { position: fixed; inset: 0; background: rgba(0,0,0,0.9); z-index: 999; display: flex; align-items: center; justify-content: center; padding: 20px; }
-        .modal-box { background: #333; padding: 25px; border-radius: 15px; width: 100%; max-width: 320px; }
+        #stats { 
+            position: absolute; top: 10px; right: 10px; 
+            background: rgba(0,0,0,0.8); padding: 5px 8px; 
+            border-radius: 4px; font-size: 11px; color: #0f0;
+            border: 1px solid #444; pointer-events: none; display: none;
+            font-family: monospace; z-index: 50;
+        }
     </style>
 </head>
 <body>
 
-<div id="guide-modal">
-    <div class="modal-box">
-        <h3 style="margin-top:0; color:var(--accent)">使用指南</h3>
-        <p style="font-size:14px; line-height:1.5">1. 等待指示灯变绿<br>2. <b>Stage 1:</b> 点选卡片四个角点，然后执行矫正<br>3. <b>Stage 2:</b> 点选内框四个界限点进行测距</p>
-        <button onclick="document.getElementById('guide-modal').style.display='none'" style="width:100%; background:var(--accent); color:white; border:none; padding:12px; border-radius:8px; font-weight:bold;">开始使用</button>
-    </div>
-</div>
-
 <div id="top-menu">
     <div class="status-bar">
         <div id="indicator" class="dot"></div>
-        <span id="status-msg">正在请求官方资源...</span>
+        <span id="status-msg">OpenCV 准备中...</span>
     </div>
+    
     <div class="btn-row">
-        <button class="primary" onclick="document.getElementById('fIn').click()">打开图片</button>
-        <button onclick="undo()">撤销选点</button>
-        <button onclick="location.reload()">重启应用</button>
-    </div>
-    <div class="btn-row bottom">
-        <button class="primary" id="btn-rect" onclick="doRect()">执行矫正</button>
-        <button class="success" id="btn-save" style="display:none" onclick="save()">保存图片</button>
+        <button class="primary" id="btn-open" onclick="document.getElementById('fIn').click()">打开图片</button>
+        <button id="btn-undo" onclick="undo()">撤销</button>
+        <button id="btn-rect" class="primary" style="background:#6610f2" onclick="doRect()">执行矫正</button>
+        
+        <button class="success" id="btn-save" style="display:none" onclick="saveImg()">另存结果</button>
         <button id="btn-rem" style="display:none" onclick="reMeasure()">重选内框</button>
+        <button id="btn-reset" style="display:none" onclick="location.reload()">重启</button>
     </div>
-    <div id="handle" onclick="document.getElementById('top-menu').classList.toggle('collapsed')"><div class="arrow"></div></div>
 </div>
 
 <div id="view">
     <div id="stats">
-        L: <span id="v-l">0</span> | R: <span id="v-r">0</span><br>
-        T: <span id="v-t">0</span> | B: <span id="v-b">0</span>
+        L:<span id="v-l">0</span> R:<span id="v-r">0</span><br>
+        T:<span id="v-t">0</span> B:<span id="v-b">0</span>
     </div>
     <canvas id="canvas"></canvas>
 </div>
@@ -100,24 +110,24 @@
     let ready = false, rawImg = null, matSrc = null, matDst = null;
     let s = 1, pts1 = [], pts2 = [], isM = false, lines = null, drag = null;
 
-    // --- 加载逻辑 ---
+    // --- 加载策略 ---
     const OFF_URL = "https://docs.opencv.org/4.x/opencv.js";
     const MIR_URL = "https://cdnjs.cloudflare.com/ajax/libs/opencv.js/4.5.5/opencv.js";
-    const timer = setTimeout(() => { if(!ready) loadScript(MIR_URL); }, 10000);
+    const timer = setTimeout(() => { if(!ready) loadCV(MIR_URL); }, 10000);
 
-    function loadScript(url) {
-        const s = document.createElement('script'); s.src = url; s.async = true;
-        s.onerror = () => { if(url===OFF_URL) loadScript(MIR_URL); };
-        document.body.appendChild(s);
+    function loadCV(url) {
+        const script = document.createElement('script'); script.src = url; script.async = true;
+        script.onerror = () => { if(url === OFF_URL) loadCV(MIR_URL); };
+        document.body.appendChild(script);
     }
     var Module = { onRuntimeInitialized: () => {
         ready = true; clearTimeout(timer);
         document.getElementById('indicator').className = 'dot ready';
         document.getElementById('status-msg').innerText = 'OpenCV 已就绪';
     }};
-    loadScript(OFF_URL);
+    loadCV(OFF_URL);
 
-    // --- 交互逻辑 ---
+    // --- 逻辑处理 ---
     document.getElementById('fIn').onchange = (e) => {
         const file = e.target.files[0];
         const reader = new FileReader();
@@ -138,12 +148,9 @@
     function getP(e) {
         const r = cvs.getBoundingClientRect();
         const t = e.touches ? e.touches[0] : e;
-        // 核心修正：缩放比例计算
-        const scaleX = cvs.width / r.width;
-        const scaleY = cvs.height / r.height;
         return {
-            x: (t.clientX - r.left) * scaleX,
-            y: (t.clientY - r.top) * scaleY
+            x: (t.clientX - r.left) * (cvs.width / r.width),
+            y: (t.clientY - r.top) * (cvs.height / r.height)
         };
     }
 
@@ -169,8 +176,8 @@
         render();
     };
 
-    cvs.addEventListener('mousedown', start);
     cvs.addEventListener('touchstart', (e) => { e.preventDefault(); start(e); }, {passive: false});
+    cvs.addEventListener('mousedown', start);
 
     const move = (e) => {
         if(!drag) return;
@@ -178,13 +185,13 @@
         if(drag==='left'||drag==='right') lines[drag] = p.x; else lines[drag] = p.y;
         render();
     };
-    window.addEventListener('mousemove', move);
     window.addEventListener('touchmove', (e) => { if(drag) e.preventDefault(); move(e); }, {passive: false});
-    window.addEventListener('mouseup', () => drag = null);
+    window.addEventListener('mousemove', move);
     window.addEventListener('touchend', () => drag = null);
+    window.addEventListener('mouseup', () => drag = null);
 
     function doRect() {
-        if(pts1.length<4) return alert("请在图上点选4个角点");
+        if(pts1.length<4) return alert("请先点选4个角点");
         let srcM = cv.matFromArray(4, 1, cv.CV_32FC2, pts1.flatMap(p => [p.x, p.y]));
         const w = Math.max(Math.hypot(pts1[1].x-pts1[0].x, pts1[1].y-pts1[0].y), Math.hypot(pts1[2].x-pts1[3].x, pts1[2].y-pts1[3].y));
         const h = Math.max(Math.hypot(pts1[3].x-pts1[0].x, pts1[3].y-pts1[0].y), Math.hypot(pts1[2].x-pts1[1].x, pts1[2].y-pts1[1].y));
@@ -194,26 +201,35 @@
         cv.warpPerspective(matSrc, matDst, M, new cv.Size(w, h));
         cvs.width = w; cvs.height = h;
         s = 2; isM = true; pts2 = []; lines = null;
+        
+        // 动态切换按钮
         document.getElementById('btn-rect').style.display = 'none';
+        document.getElementById('btn-undo').style.display = 'none';
         document.getElementById('btn-save').style.display = 'inline-block';
         document.getElementById('btn-rem').style.display = 'inline-block';
+        document.getElementById('btn-reset').style.display = 'inline-block';
+        
         render(); srcM.delete(); dstM.delete(); M.delete();
     }
 
     function render() {
         if(!rawImg) return;
         ctx.clearRect(0,0,cvs.width,cvs.height);
-        if(s===1) { cv.imshow(cvs, matSrc); 
-            ctx.fillStyle = "#00ff00"; pts1.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, cvs.width/60, 0, Math.PI*2); ctx.fill(); });
-        } else { cv.imshow(cvs, matDst);
+        if(s===1) {
+            cv.imshow(cvs, matSrc);
+            ctx.fillStyle = "#0f0";
+            pts1.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, cvs.width/60, 0, Math.PI*2); ctx.fill(); });
+        } else {
+            cv.imshow(cvs, matDst);
             if(isM) {
-                ctx.fillStyle = "#00ff00"; pts2.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, cvs.width/80, 0, Math.PI*2); ctx.fill(); });
+                ctx.fillStyle = "#0f0";
+                pts2.forEach(p => { ctx.beginPath(); ctx.arc(p.x, p.y, cvs.width/80, 0, Math.PI*2); ctx.fill(); });
             } else if(lines) {
-                ctx.strokeStyle = "#ffff00"; ctx.lineWidth = cvs.width/150;
-                ctx.beginPath(); ctx.moveTo(lines.left,0); ctx.lineTo(lines.left,cvs.height); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(lines.right,0); ctx.lineTo(lines.right,cvs.height); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(0,lines.top); ctx.lineTo(cvs.width,lines.top); ctx.stroke();
-                ctx.beginPath(); ctx.moveTo(0,lines.bottom); ctx.lineTo(cvs.width,lines.bottom); ctx.stroke();
+                ctx.strokeStyle = "#ff0"; ctx.lineWidth = cvs.width/150;
+                const draw = (x1,y1,x2,y2) => { ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke(); };
+                draw(lines.left, 0, lines.left, cvs.height); draw(lines.right, 0, lines.right, cvs.height);
+                draw(0, lines.top, cvs.width, lines.top); draw(0, lines.bottom, cvs.width, lines.bottom);
+                
                 document.getElementById('v-l').innerText = lines.left.toFixed(1);
                 document.getElementById('v-r').innerText = (cvs.width - lines.right).toFixed(1);
                 document.getElementById('v-t').innerText = lines.top.toFixed(1);
@@ -224,7 +240,7 @@
 
     function undo() { if(s===1) pts1.pop(); else pts2.pop(); render(); }
     function reMeasure() { isM = true; pts2 = []; lines = null; document.getElementById('stats').style.display = 'none'; render(); }
-    function save() { const a = document.createElement('a'); a.download = 'psa_result.png'; a.href = cvs.toDataURL(); a.click(); }
+    function saveImg() { const a = document.createElement('a'); a.download = 'psa_check.png'; a.href = cvs.toDataURL(); a.click(); }
 </script>
 </body>
 </html>
